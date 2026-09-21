@@ -325,7 +325,8 @@ function reduceGame(state: FullState, action: Action): FullState {
       };
       room.items = [...room.items, item];
       room.cleanliness = Math.min(100, room.cleanliness + 2);
-      s.selectedSlot = { slot: candidateSlot, place: action.zone };
+      // Keep the build catalogue open, but return placement to automatic selection after every purchase.
+      s.selectedSlot = null;
       for (const tid of room.tenantIds) {
         const t = s.tenants[tid];
         if (!t) continue;
@@ -465,7 +466,9 @@ function reduceGame(state: FullState, action: Action): FullState {
     case "cleanRoom": {
       const s = clone(state);
       const room = s.rooms[action.roomId];
-      if (s.money < CLEAN_COST) return state;
+      if (!room?.unlocked) return state;
+      if (room.cleanliness >= 100) { pushToast(s, "บ้านสะอาดเต็ม 100% แล้ว", "info"); return s; }
+      if (s.money < CLEAN_COST) { pushToast(s, `ต้องใช้ ${CLEAN_COST} บาทเพื่อทำความสะอาดบ้าน`, "bad"); return s; }
       s.money -= CLEAN_COST;
       room.cleanliness = 100;
       for (const tid of room.tenantIds) {

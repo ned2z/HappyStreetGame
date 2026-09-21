@@ -551,7 +551,7 @@ export const FURNITURE: FurnitureDef[] = [...ORIGINAL_FURNITURE, ...EXTRA_FURNIT
 export const FURNITURE_MAP: Record<string, FurnitureDef> = Object.fromEntries(FURNITURE.map((f) => [f.id, f]));
 
 export const ZONES: PlaceType[] = ["floor", "loft", "wall", "terrace", "nook", "surface", "ceiling"];
-export const ZONE_LABEL: Record<PlaceType, string> = { floor: "พื้นชั้นล่าง", loft: "ชั้นสอง", wall: "ผนัง", terrace: "สวนและระเบียง", nook: "มุมหน้าห้อง", surface: "ชั้นวางบิลท์อิน", ceiling: "เพดาน" };
+export const ZONE_LABEL: Record<PlaceType, string> = { floor: "พื้นชั้น 1", loft: "พื้นที่ชั้น 2-4", wall: "ผนังทุกชั้น", terrace: "สวนและระเบียง", nook: "มุมหน้าห้อง", surface: "ชั้นวางบิลท์อิน", ceiling: "เพดานทุกชั้น" };
 const OUTDOOR = new Set(["plant", "lamp", "chair", "yoga", "hammock", "telescope", "birdcage", "petbed", "coffee"]);
 const SMALL = new Set(["plant", "lamp", "chair", "diffuser", "purifier", "robot", "fireext", "safe", "speaker"]);
 export function allowedZones(def: FurnitureDef): PlaceType[] {

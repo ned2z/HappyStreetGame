@@ -1,12 +1,13 @@
 import type { Action, FullState } from "../game/store";
 import { roomCapacity, reputation, unlockCost, houseLevel, type Evaluation } from "../game/engine";
+import { houseStoryCount } from "../game/layout";
 import { FLOOR_PREF_INFO, MOOD_INFO, moodOf } from "../game/tenants";
 import { Bar, money, Stars } from "./ui";
 import { cn } from "../utils/cn";
 
 export type SheetKind = "shop" | "tenant" | "applicants" | "room" | "item" | "expand" | "outdoor" | null;
 
-const room_cleanWarn = (c: number) => c < 45;
+const room_cleanWarn = (c: number) => c < 70;
 
 interface Props {
   state: FullState;
@@ -17,6 +18,38 @@ interface Props {
   net: number;
   openSheet: (s: SheetKind) => void;
   sheet: SheetKind;
+}
+
+const ModeIcon = ({ name }: { name: Exclude<SheetKind, "item" | null> }) => {
+  const paths: Record<typeof name, string[]> = {
+    shop: ["M4 20h16M7 20V9h10v11M5 9l7-5 7 5", "M9 13h6M12 10v6"],
+    outdoor: ["M12 21v-9M12 15c-4 0-6-2-6-6 4 0 6 2 6 6ZM12 12c4 0 6-2 6-6-4 0-6 2-6 6"],
+    tenant: ["M16 21v-2a4 4 0 0 0-4-4H7a4 4 0 0 0-4 4v2M9.5 11a4 4 0 1 0 0-8 4 4 0 0 0 0 8ZM17 11a3 3 0 0 1 3 3v1"],
+    applicants: ["M4 21v-2a4 4 0 0 1 4-4h4a4 4 0 0 1 4 4v2M10 11a4 4 0 1 0 0-8 4 4 0 0 0 0 8ZM19 8v6M16 11h6"],
+    room: ["m3 10 9-7 9 7v10H3ZM9 20v-7h6v7"],
+    expand: ["M4 20h16M6 20V8h12v12M9 8V4h6v4M12 11v6M9 14h6"],
+  };
+  return <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round">{paths[name].map((d) => <path key={d} d={d} />)}</svg>;
+};
+
+export function BuildRail({ state, sheet, openSheet }: Pick<Props, "state" | "sheet" | "openSheet">) {
+  const selected = state.rooms[state.selectedRoom ?? 0];
+  const modes: { key: Exclude<SheetKind, "item" | null>; label: string }[] = [
+    { key: "shop", label: "ตกแต่ง" },
+    { key: "outdoor", label: "ส่วนกลาง" },
+    { key: "tenant", label: "ผู้เช่า" },
+    { key: "applicants", label: "ผู้สมัคร" },
+    { key: "room", label: "จัดการบ้าน" },
+    { key: "expand", label: "พัฒนาบ้าน" },
+  ];
+  return <nav className="build-rail" aria-label="Build Mode">
+    <div className="build-rail-title"><span>BUILD</span><small>MODE</small></div>
+    {modes.map((mode) => <button type="button" key={mode.key} aria-pressed={sheet === mode.key} onClick={() => openSheet(sheet === mode.key ? null : mode.key)} title={mode.label}>
+      <ModeIcon name={mode.key} /><span>{mode.label}</span>
+      {mode.key === "tenant" && selected?.tenantIds.length > 0 && <b>{selected.tenantIds.length}</b>}
+      {mode.key === "applicants" && state.applicants.length > 0 && <b>{state.applicants.length}</b>}
+    </button>)}
+  </nav>;
 }
 
 export function TopBar({
@@ -56,10 +89,10 @@ export function TopBar({
       </div>
       <div className="village-brand"><span>Cozy Nest</span><small>A LITTLE NEIGHBOURHOOD</small></div>
 
-      <div className="glass pointer-events-auto flex items-center gap-1 rounded-2xl px-1.5 py-1.5">
-        <div className="px-1 text-center">
-          <div className="font-cute text-xs leading-none font-bold text-white">วันที่ {state.day}</div>
-          <div className="hidden text-[9px] text-white/50 sm:block">Cozy Nest</div>
+      <div className="date-bar glass pointer-events-auto flex items-center gap-1.5 rounded-2xl px-2 py-2">
+        <div className="date-copy px-1 text-center">
+          <div className="date-label">DAY</div>
+          <div className="font-cute leading-none font-bold text-white">วันที่ {state.day}</div>
         </div>
         {[0, 1, 2, 4].map((s) => (
           <button
@@ -83,16 +116,14 @@ export function TopBar({
   );
 }
 
-export function BottomDock({ state, dispatch, evals, roomRents, openSheet, sheet }: Props) {
+export function BottomDock({ state, dispatch, evals, roomRents, openSheet }: Props) {
   const unlockedRooms = state.rooms.filter((r) => r.unlocked);
   const nextLocked = state.rooms.find((r) => !r.unlocked);
   const cost = nextLocked ? unlockCost(unlockedRooms.length) : 0;
   const sel = state.selectedRoom;
-  const selRoom = sel != null ? state.rooms[sel] : null;
-  const selFirst = selRoom?.tenantIds[0] ? state.tenants[selRoom.tenantIds[0]] : null;
 
   return (
-    <div className="pointer-events-none absolute inset-x-0 bottom-0 z-20 flex flex-col gap-2 p-2 pb-[max(0.5rem,env(safe-area-inset-bottom))]">
+    <div className="house-strip pointer-events-none absolute inset-x-0 bottom-0 z-20 flex flex-col gap-2 p-2 pb-[max(0.5rem,env(safe-area-inset-bottom))]">
       {/* แถบห้องทั้งหมด */}
       <div className="house-dock no-scrollbar pointer-events-auto flex gap-2 overflow-x-auto pb-1">
         {unlockedRooms.map((r) => {
@@ -114,7 +145,7 @@ export function BottomDock({ state, dispatch, evals, roomRents, openSheet, sheet
             >
               <div className="flex items-center justify-between">
                 <span className="font-cute text-xs font-bold text-white">บ้าน {r.id + 1}</span>
-                <span className="text-[10px]" style={{ color: houseLevel(r.level).color }}>Lv.{r.level}/5</span>
+                <span className="text-[10px]" style={{ color: houseLevel(r.level).color }}>Lv.{r.level} / {houseStoryCount(r.level)}F</span>
               </div>
               {tenants.length > 0 ? (
                 <>
@@ -170,29 +201,6 @@ export function BottomDock({ state, dispatch, evals, roomRents, openSheet, sheet
         )}
       </div>
 
-      {/* เมนูหลัก */}
-      <div className="glass pointer-events-auto flex items-center gap-1 rounded-2xl p-1.5">
-        {[
-          { k: "shop" as const, icon: "🛒", label: "ตกแต่ง" },
-          { k: "outdoor" as const, icon: "S", label: "ส่วนกลาง" },
-          { k: "tenant" as const, icon: selFirst ? selFirst.emoji : "👤", label: "ผู้เช่า" },
-          { k: "applicants" as const, icon: "👥", label: `ผู้สมัคร (${state.applicants.length})` },
-          { k: "room" as const, icon: "🏠", label: "บ้าน" },
-          { k: "expand" as const, icon: "🏗️", label: "ขยาย" },
-        ].map((b) => (
-          <button
-            key={b.k}
-            onClick={() => openSheet(sheet === b.k ? null : b.k)}
-            className={cn(
-              "btn-pop flex flex-1 flex-col items-center gap-0.5 rounded-xl py-1.5 text-[10px] font-semibold",
-              sheet === b.k ? "bg-amber-300 text-[#3a2a00]" : "text-white/75 hover:bg-white/10",
-            )}
-          >
-            <span className="text-lg leading-none">{b.icon}</span>
-            <span className="truncate">{b.label}</span>
-          </button>
-        ))}
-      </div>
     </div>
   );
 }

@@ -2,7 +2,7 @@ import type { GameState, Room } from "../game/engine";
 import { HOUSE_LEVELS, houseLevel } from "../game/houseLevels";
 import { roomSystems } from "../game/equipment";
 import { ZONES } from "../game/furniture";
-import { zoneCapacity } from "../game/layout";
+import { houseStoryCount, zoneCapacity } from "../game/layout";
 import { commonBenefits } from "../game/commons";
 
 export function HouseLevelTrack({ room }: { room: Room }) {
@@ -15,7 +15,7 @@ export function HouseLevelTrack({ room }: { room: Room }) {
         <span className="block text-[9px]">{level.capacity} คน</span>
       </li>)}
     </ol>
-    <p className="mt-2 text-[10px] leading-relaxed text-white/55">พื้นที่ {ZONES.reduce((n, zone) => n + zoneCapacity(room.level, zone), 0)} ช่อง / ความคาดหวัง {current.need} แต้มต่อรสนิยม</p>
+    <p className="mt-2 text-[10px] leading-relaxed text-white/55">บ้าน {houseStoryCount(room.level)} ชั้น / พื้นที่ {ZONES.reduce((n, zone) => n + zoneCapacity(room.level, zone), 0)} ช่อง / ความคาดหวัง {current.need} แต้มต่อรสนิยม</p>
   </section>;
 }
 

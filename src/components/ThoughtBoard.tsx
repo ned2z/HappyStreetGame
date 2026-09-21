@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import type { FullState, Action } from "../game/store";
 import { ACTIVITY_INFO, activityLine } from "../game/activities";
 import { isSpecial, moodOf } from "../game/tenants";
@@ -9,25 +9,60 @@ const MOODS = { happy: { text: "มีความสุข", color: "#598561" }
 export function ThoughtBoard({ state, dispatch, onInspect, covered }: { state: FullState; dispatch: (action: Action) => void; onInspect: (roomId: number) => void; covered: boolean }) {
   const [query, setQuery] = useState("");
   const [expanded, setExpanded] = useState(false);
+  const [hidden, setHidden] = useState(() => {
+    try {
+      const saved = localStorage.getItem("cozy-thoughts-semi-hidden");
+      return saved === null ? true : saved === "1";
+    } catch { return true; }
+  });
+  const [hint, setHint] = useState(() => {
+    try { return localStorage.getItem("cozy-thoughts-tab-hint-seen") !== "1"; } catch { return true; }
+  });
+  useEffect(() => {
+    if (!hidden || !hint) return;
+    const timer = window.setTimeout(() => {
+      setHint(false);
+      try { localStorage.setItem("cozy-thoughts-tab-hint-seen", "1"); } catch { /* storage unavailable */ }
+    }, 3600);
+    return () => window.clearTimeout(timer);
+  }, [hidden, hint]);
+  const toggleHidden = () => {
+    const next = !hidden;
+    setHidden(next);
+    if (next) {
+      setExpanded(false);
+      setHint(false);
+    }
+    try { localStorage.setItem("cozy-thoughts-semi-hidden", next ? "1" : "0"); } catch { /* storage unavailable */ }
+  };
   const residents = state.rooms.filter((room) => room.unlocked).flatMap((room) => room.tenantIds.map((id) => ({ room, tenant: state.tenants[id] })).filter(({ tenant }) => !!tenant));
   const visible = residents.filter(({ room, tenant }) => `${tenant.name} บ้าน ${room.id + 1}`.toLowerCase().includes(query.trim().toLowerCase()));
   const concerned = residents.filter(({ tenant }) => tenant.satisfaction < (isSpecial(tenant) ? 75 : 40)).length;
-  return <aside className={`thought-board ${expanded ? "expanded" : ""} ${covered ? "covered" : ""}`} aria-label="ความคิดของผู้เช่าทุกบ้าน">
+  return <aside className={`thought-board ${expanded ? "expanded" : ""} ${hidden ? "hidden" : ""} ${hint ? "show-hide-hint" : ""} ${covered ? "covered" : ""}`} aria-label="ความคิดของผู้เช่าทุกบ้าน" aria-hidden={covered}>
+    <button type="button" className="thought-pull" onClick={toggleHidden} aria-label={hidden ? "ดึง Little Thoughts ออกมา" : "ซ่อน Little Thoughts"} title={hidden ? "แสดง Little Thoughts" : "ซ่อน Little Thoughts"}>
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7"><path d={hidden ? "m8 5 7 7-7 7" : "m16 5-7 7 7 7"}/></svg><span>{hidden ? "THOUGHTS" : "ซ่อน"}</span>
+    </button>
+    {!hidden && <>
     <header className="thought-header">
       <div><span className="thought-eyebrow">LITTLE THOUGHTS</span><h2>ทุกคนคิดอะไรอยู่<span>{residents.length}</span></h2></div>
-      <button type="button" onClick={() => setExpanded(!expanded)} aria-label={expanded ? "ย่อแผงความคิด" : "ขยายแผงความคิด"} title={expanded ? "ย่อ" : "ขยาย"}>
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5"><path d={expanded ? "M4 9h5V4m11 11h-5v5M9 9 3 3m12 12 6 6" : "M9 4H4v5m11 11h5v-5M4 4l6 6m10 10-6-6"} /></svg>
-      </button>
+      <div className="thought-header-actions">
+        <button type="button" onClick={() => setExpanded(!expanded)} aria-label={expanded ? "ย่อแผงความคิด" : "ขยายแผงความคิด"} title={expanded ? "ย่อ" : "ขยาย"}>
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5"><path d={expanded ? "M4 9h5V4m11 11h-5v5M9 9 3 3m12 12 6 6" : "M9 4H4v5m11 11h5v-5M4 4l6 6m10 10-6-6"} /></svg>
+        </button>
+        <button type="button" onClick={toggleHidden} aria-label="พับ Little Thoughts เป็นแท็บ" title="พับเก็บ">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7"><path d="m16 5-7 7 7 7" /></svg>
+        </button>
+      </div>
     </header>
     <div className="thought-toolbar"><span>ทุกบ้านในหน้าเดียว</span><span className={concerned ? "attention" : ""}>{concerned ? `ต้องดูแล ${concerned} คน` : "อ่านความคิดล่าสุด"}</span></div>
     <label className="thought-search"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6"><circle cx="10" cy="10" r="6"/><path d="m15 15 5 5"/></svg><input value={query} onChange={(e) => setQuery(e.target.value)} placeholder="ค้นหาชื่อหรือบ้าน..." aria-label="ค้นหาความคิดผู้เช่า" /></label>
     <div className="thought-list thin-scroll" tabIndex={0} aria-label={`ความคิดผู้เช่า ${visible.length} คน เลื่อนเพื่ออ่านทุกคน`}>
-      {visible.map(({ room, tenant }) => {
+      {visible.map(({ room, tenant }, index) => {
         const thought = state.thoughts[tenant.id];
         const mood = isSpecial(tenant) && tenant.satisfaction < 75 ? { text: "ต่ำกว่าเกณฑ์ VIP", color: "#b68153" } : MOODS[moodOf(tenant.satisfaction)];
         const definition = ACTIVITY_INFO[tenant.behavior.activity];
         const seconds = Math.ceil(tenant.behavior.remainingMs / 1000);
-        return <article className="thought-row" key={tenant.id}>
+        return <article className={`thought-row thought-tone-${(room.id + index) % 4} ${isSpecial(tenant) ? "thought-special" : ""}`} key={tenant.id}>
           <button type="button" className="thought-person" onClick={() => onInspect(room.id)} aria-label={`ดู ${tenant.name} บ้าน ${room.id + 1}`}>
             <ResidentPortrait tenant={tenant} size={38} />
             <span className="thought-person-label"><strong>{tenant.name}{isSpecial(tenant) && <i>SPECIAL</i>}</strong><small>บ้าน {String(room.id + 1).padStart(2, "0")} / Lv.{room.level}</small></span>
@@ -41,5 +76,6 @@ export function ThoughtBoard({ state, dispatch, onInspect, covered }: { state: F
       {visible.length === 0 && <p className="thought-empty">{residents.length ? "ไม่พบผู้เช่าตามคำค้น" : "เมื่อมีผู้เช่าย้ายเข้า ความคิดของทุกคนจะอยู่ที่นี่"}</p>}
     </div>
     <footer className="thought-footer"><span className="live-dot" /> ข้อความล่าสุดไม่หายเมื่อบับเบิ้ลบนฉากหายไป</footer>
+    </>}
   </aside>;
 }

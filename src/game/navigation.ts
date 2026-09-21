@@ -1,7 +1,7 @@
 import type { PlacedItem, Room } from "./engine";
 import {
-  ACTOR_RADIUS, LOFT_Y, ROOM_W, STAIR_STEPS, TERRACE_DEPTH, isWallSlot, interactionFloor, slotZone,
-  itemBounds, loftFront, pointInBounds, roomDepth, slotPosition, stairs, terraceFixtures,
+  ACTOR_RADIUS, STORY_HEIGHT, STAIR_X, STAIR_WIDTH, ROOM_W, STAIR_STEPS, TERRACE_DEPTH, houseStoryCount, isWallSlot, interactionFloor, slotZone,
+  itemBounds, loftFront, pointInBounds, roomDepth, slotPosition, stairFlights, terraceFixtures,
   type Bounds3, type Point3,
 } from "./layout";
 
@@ -26,7 +26,7 @@ export function navigationFor(room: Room) {
   return nav;
 }
 
-/** Two walkable grids joined only by the physical staircase, never by a vertical teleport. */
+/** Every physical storey gets a walkable grid joined only by real stair flights. */
 export class RoomNavigation {
   readonly room: Room;
   readonly nodes: Node[] = [];
@@ -39,26 +39,26 @@ export class RoomNavigation {
     const front = loftFront(room.level);
     this.obstacles = [
       ...room.items.filter((i) => i.defId !== "rug" && !(i.defId === "yoga" && i.grade < 2)).map((i) => itemBounds(room, i)),
-      stairs(room).bounds,
       ...terraceFixtures(room),
       { min: { x: -ROOM_W / 2, y: 0, z: d / 2 - 0.07 }, max: { x: -0.92, y: 0.6, z: d / 2 + 0.07 } },
       { min: { x: 0.92, y: 0, z: d / 2 - 0.07 }, max: { x: ROOM_W / 2, y: 0.6, z: d / 2 + 0.07 } },
       { min: { x: 0.92, y: 0, z: d / 2 - 1.1 }, max: { x: 1.05, y: 1.84, z: d / 2 + 0.10 } },
-      { min: { x: -3.48, y: 0, z: front - 0.11 }, max: { x: -3.32, y: LOFT_Y - 0.1, z: front + 0.11 } },
+      ...Array.from({ length: houseStoryCount(room.level) - 1 }, (_, story) => ({ min: { x: -ROOM_W / 2 + 0.1, y: story * STORY_HEIGHT, z: front - 0.11 }, max: { x: -ROOM_W / 2 + 0.28, y: (story + 1) * STORY_HEIGHT - 0.1, z: front + 0.11 } })),
     ];
     this.buildGrid(0, d / 2 + TERRACE_DEPTH - 0.34);
-    this.buildGrid(LOFT_Y, front - 0.30);
-    const stair = stairs(room);
-    const bottomId = this.addNode({ ...stair.bottom, stair: true });
-    this.connectLanding(bottomId, 0);
-    let previous = bottomId;
-    for (let i = 1; i <= STAIR_STEPS; i++) {
-      const ratio = i / STAIR_STEPS;
-      const id = this.addNode({ x: stair.bottom.x, y: LOFT_Y * ratio, z: stair.bottom.z + (stair.top.z - stair.bottom.z) * ratio, stair: true });
-      this.link(previous, id);
-      previous = id;
+    for (let story = 1; story < houseStoryCount(room.level); story++) this.buildGrid(story * STORY_HEIGHT, front + 2.92);
+    for (const stair of stairFlights(room)) {
+      const bottomId = this.addNode({ ...stair.bottom, stair: true });
+      this.connectLanding(bottomId, stair.bottom.y);
+      let previous = bottomId;
+      for (let i = 1; i <= STAIR_STEPS; i++) {
+        const ratio = i / STAIR_STEPS;
+        const id = this.addNode({ x: stair.bottom.x, y: stair.bottom.y + STORY_HEIGHT * ratio, z: stair.bottom.z + (stair.top.z - stair.bottom.z) * ratio, stair: true });
+        this.link(previous, id);
+        previous = id;
+      }
+      this.connectLanding(previous, stair.top.y);
     }
-    this.connectLanding(previous, LOFT_Y);
     const seed = this.nearest({ x: 0, y: 0, z: d / 2 + 0.65 });
     if (seed >= 0) {
       const queue = [seed];
@@ -75,9 +75,20 @@ export class RoomNavigation {
   isClear(p: Point3, radius = ACTOR_RADIUS, avoid: Point3[] = []) {
     const d = roomDepth(this.room.level);
     if (p.x < -ROOM_W / 2 + radius + 0.11 || p.x > ROOM_W / 2 - radius - 0.11) return false;
-    const upper = p.y > LOFT_Y / 2;
-    const maxZ = upper ? loftFront(this.room.level) - radius : d / 2 + TERRACE_DEPTH - radius;
+    const upper = p.y > STORY_HEIGHT / 2;
+    const front = loftFront(this.room.level);
+    const maxZ = upper ? front + 2.92 - radius : d / 2 + TERRACE_DEPTH - radius;
     if (p.z < -d / 2 + radius + 0.13 || p.z > maxZ) return false;
+    // Upper floors extend outside only through a broad, open landing around the stair shaft.
+    if (upper && p.z > front - 0.2 && p.z < front + 2.24) {
+      const corridorLeft = STAIR_X - STAIR_WIDTH - 0.92;
+      const corridorRight = STAIR_X - STAIR_WIDTH / 2 - 0.12;
+      if (p.x < corridorLeft + radius || p.x > corridorRight - radius) return false;
+    }
+    const onStory = Math.abs(p.y / STORY_HEIGHT - Math.round(p.y / STORY_HEIGHT)) < 0.03;
+    if (onStory && Math.round(p.y / STORY_HEIGHT) > 0) {
+      if (p.x > STAIR_X - STAIR_WIDTH / 2 - radius && p.z > front - 0.12 - radius && p.z < front + 2.28 + radius) return false;
+    }
     if (this.obstacles.some((b) => p.y < b.max.y - 0.02 && p.y + 1.12 > b.min.y + 0.03 && pointInBounds(p, b, radius))) return false;
     return !avoid.some((a) => Math.abs(a.y - p.y) < 0.6 && Math.hypot(a.x - p.x, a.z - p.z) < radius * 2 + 0.08);
   }
@@ -144,7 +155,7 @@ export class RoomNavigation {
   accessPoint(item: PlacedItem, from: Point3, avoid: Point3[] = []): Waypoint | null {
     const bounds = itemBounds(this.room, item);
     const p = slotPosition(this.room, item.slot);
-    const y = interactionFloor(item.slot);
+    const y = interactionFloor(item.slot, this.room.level);
     const margin = ACTOR_RADIUS + 0.14;
     const points: Point3[] = [
       { x: p.x, y, z: bounds.max.z + margin },
@@ -218,7 +229,7 @@ export class RoomNavigation {
   }
 
   routesRemainOpen() {
-    const top = stairs(this.room).top;
+    const top = stairFlights(this.room).at(-1)!.top;
     const topId = this.nearest(top, true);
     if (topId < 0 || distance(top, this.nodes[topId]) > 0.4) return false;
     const door = { x: 0, y: 0, z: roomDepth(this.room.level) / 2 + 0.6 };

@@ -8,7 +8,7 @@ import { houseLevel, roomCapacity, visibleHouseIds } from "../game/houseLevels";
 import { ACTIVITY_INFO } from "../game/activities";
 import type { Tenant } from "../game/tenants";
 import {
-  LOFT_Y, ROOM_W, WALL_HEIGHT, TERRACE_DEPTH, encodeSlot, furnitureSize, isMountedSlot, interactionFloor,
+  ROOM_W, STORY_HEIGHT, TERRACE_DEPTH, encodeSlot, furnitureSize, houseHeight, houseStoryCount, isMountedSlot, interactionFloor,
   loftFront, roomDepth, roomPosition, slotPosition, slotZone, zoneCapacity, type Point3,
 } from "../game/layout";
 import { layoutKey, navigationFor, type RoomNavigation, type Waypoint } from "../game/navigation";
@@ -23,7 +23,7 @@ import { isSpecial } from "../game/tenants";
 import { animateSpecialAura, createSpecialAura, type SpecialAura } from "./aura";
 
 export interface PickTarget {
-  type: "room" | "slot" | "item" | "tenant" | "locked" | "outdoor-slot" | "outdoor-item";
+  type: "room" | "slot" | "item" | "tenant" | "locked" | "outdoor-slot" | "outdoor-item" | "clean";
   roomId: number;
   slot?: number;
   place?: PlaceType;
@@ -67,6 +67,8 @@ interface RoomView {
   badge: THREE.Sprite | null;
   badgeText: string;
   selection: THREE.Mesh | null;
+  clean: THREE.Sprite | null;
+  cleanKey: string;
 }
 
 function label(text: string, color = "#344f45", background = "#fffaf0", size = 32) {
@@ -86,6 +88,23 @@ function label(text: string, color = "#344f45", background = "#fffaf0", size = 3
   sprite.scale.set(canvas.width / canvas.height * 0.34, 0.34, 1);
   sprite.renderOrder = 30;
   return sprite;
+}
+
+function cleanBadge(value: number) {
+  const canvas = document.createElement("canvas"); canvas.width = 560; canvas.height = 116;
+  const c = canvas.getContext("2d")!;
+  c.shadowColor = "rgba(74,54,32,.20)"; c.shadowBlur = 12; c.shadowOffsetY = 5;
+  c.fillStyle = "#fff8e9"; c.beginPath(); c.roundRect(5, 5, 550, 98, 34); c.fill(); c.shadowColor = "transparent";
+  c.strokeStyle = value < 40 ? "#c36c58" : "#d1a05b"; c.lineWidth = 4; c.beginPath(); c.roundRect(5, 5, 550, 98, 34); c.stroke();
+  c.fillStyle = value < 40 ? "#bd705b" : "#be9251"; c.beginPath(); c.arc(59, 54, 34, 0, Math.PI * 2); c.fill();
+  c.strokeStyle = "#fff7e6"; c.lineWidth = 7; c.lineCap = "round";
+  c.beginPath(); c.moveTo(47, 32); c.lineTo(69, 69); c.stroke();
+  c.fillStyle = "#fff7e6"; c.beginPath(); c.moveTo(63, 65); c.lineTo(84, 75); c.lineTo(69, 88); c.closePath(); c.fill();
+  c.font = '800 31px "Noto Sans Thai", sans-serif'; c.fillStyle = "#514936"; c.textAlign = "left"; c.fillText("CLEAN HOUSE", 110, 45);
+  c.font = '600 22px "Noto Sans Thai", sans-serif'; c.fillStyle = value < 40 ? "#a8574b" : "#88775e"; c.fillText(`ความสะอาด ${Math.round(value)}%  /  กดทำความสะอาด`, 110, 77);
+  const texture = new THREE.CanvasTexture(canvas); texture.colorSpace = THREE.SRGBColorSpace;
+  const sprite = new THREE.Sprite(new THREE.SpriteMaterial({ map: texture, transparent: true, depthTest: false, depthWrite: false, toneMapped: false }));
+  sprite.scale.set(4.35, 0.9, 1); sprite.renderOrder = 42; return sprite;
 }
 
 export class SceneManager {
@@ -245,7 +264,7 @@ export class SceneManager {
       if (!view) {
         const group = new THREE.Group(); const p = roomPosition(room); group.position.set(p.x, p.y, p.z);
         this.scene.add(group);
-        view = { group, shell: new THREE.Group(), upper: new THREE.Group(), items: new Map(), actors: new Map(), pads: new THREE.Group(), key: "", shellKey: "", padKey: "", nav: navigationFor(room), badge: null, badgeText: "", selection: null };
+        view = { group, shell: new THREE.Group(), upper: new THREE.Group(), items: new Map(), actors: new Map(), pads: new THREE.Group(), key: "", shellKey: "", padKey: "", nav: navigationFor(room), badge: null, badgeText: "", selection: null, clean: null, cleanKey: "" };
         group.add(view.pads); this.views.set(room.id, view);
       }
       const shellKey = `${room.unlocked}:${room.level}`, key = layoutKey(room);
@@ -266,7 +285,7 @@ export class SceneManager {
         for (const it of view.items.values()) this.remove(it.root);
         view.items.clear(); dirty = true;
       }
-      const badgeText = room.unlocked ? `${String(room.id + 1).padStart(2, "0")}  ${houseLevel(room.level).en}  /  Lv.${room.level}  /  ${room.tenantIds.length}/${roomCapacity(room)}` : `${String(room.id + 1).padStart(2, "0")}  /  บ้านรอเปิดให้เช่า`;
+      const badgeText = room.unlocked ? `${String(room.id + 1).padStart(2, "0")}  ${houseLevel(room.level).en}  /  Lv.${room.level}  /  ${houseStoryCount(room.level)}F  /  ${room.tenantIds.length}/${roomCapacity(room)}` : `${String(room.id + 1).padStart(2, "0")}  /  บ้านรอเปิดให้เช่า`;
       if (view.badgeText !== badgeText || dirty) {
         if (view.badge) this.remove(view.badge);
         view.badge = label(badgeText, "#eff0e1", room.unlocked ? "#4b6656" : "#83917f", 30);
@@ -274,12 +293,25 @@ export class SceneManager {
         view.badge.userData.pick = { type: room.unlocked ? "room" : "locked", roomId: room.id } satisfies PickTarget;
         view.group.add(view.badge); view.badgeText = badgeText;
       }
+      const cleanKey = room.unlocked && room.cleanliness < 70 ? String(Math.round(room.cleanliness)) : "";
+      if (cleanKey !== view.cleanKey) {
+        if (view.clean) this.remove(view.clean);
+        view.clean = null; view.cleanKey = cleanKey;
+        if (cleanKey) {
+          view.clean = cleanBadge(room.cleanliness);
+          // House name is at y=.6; the larger clean action sits directly underneath it.
+          view.clean.position.set(0, 0.10, roomDepth(room.level) / 2 + TERRACE_DEPTH + 0.34);
+          view.clean.userData.pick = { type: "clean", roomId: room.id } satisfies PickTarget;
+          view.group.add(view.clean);
+        }
+      }
       if (!room.unlocked) continue;
       if (key !== view.key) {
         view.nav = navigationFor(room); view.key = key; this.syncItems(view, room);
         for (const actor of view.actors.values()) {
           const p = actor.rig.root.position;
-          if ((p.y < 0.02 || Math.abs(p.y - LOFT_Y) < 0.02) && !view.nav.isClear(p)) {
+          const onStory = Math.abs(p.y / STORY_HEIGHT - Math.round(p.y / STORY_HEIGHT)) < 0.02;
+          if (onStory && !view.nav.isClear(p)) {
             const safe = view.nav.safePoint(p); if (safe) p.set(safe.x, safe.y, safe.z);
           }
           actor.serial = -1;
@@ -414,7 +446,7 @@ export class SceneManager {
     } else {
       const x = [-0.7, 0.7, -1.65, 1.65][index % 4];
       let p: Point3 = { x, y: 0, z: d / 2 - 1.4 };
-      if (info.destination === "loft") p = { x, y: LOFT_Y, z: loftFront(room.level) - 0.5 };
+      if (info.destination === "loft") p = { x, y: (houseStoryCount(room.level) - 1) * STORY_HEIGHT, z: loftFront(room.level) - 0.5 };
       if (info.destination === "terrace") p = { x, y: 0, z: d / 2 + 2.6 };
       if (info.destination === "door") p = { x: index % 2 ? 0.45 : -0.45, y: 0, z: d / 2 + 0.65 + Math.floor(index / 2) * 0.4 };
       goal = view.nav.safePoint(p);
@@ -465,10 +497,10 @@ export class SceneManager {
       view.upper.visible = this.options.upper;
       if (view.selection) view.selection.visible = id === selected;
       for (const child of view.shell.children) if (child instanceof THREE.PointLight) child.visible = view.group.visible;
-      for (const item of view.items.values()) item.root.visible = this.options.upper || interactionFloor(item.item.slot) === 0;
+      for (const item of view.items.values()) item.root.visible = this.options.upper || interactionFloor(item.item.slot, this.state!.rooms[id].level) === 0;
       for (const pad of view.pads.children) {
         const pick = pad.userData.pick as PickTarget;
-        pad.visible = (this.options.scope === "room" || id === selected) && (this.options.upper || interactionFloor(encodeSlot(pick.place!, pick.slot!)) === 0);
+        pad.visible = (this.options.scope === "room" || id === selected) && (this.options.upper || interactionFloor(encodeSlot(pick.place!, pick.slot!), this.state!.rooms[id].level) === 0);
       }
       for (const actor of view.actors.values()) if (actor.route) actor.route.visible = this.options.paths;
     }
@@ -484,7 +516,7 @@ export class SceneManager {
     const bounds = new THREE.Box3();
     for (const room of houses) {
       const p = roomPosition(room), d = roomDepth(room.level);
-      for (const x of [p.x - ROOM_W / 2 - 0.5, p.x + ROOM_W / 2 + 0.5]) for (const y of [-0.5, WALL_HEIGHT + 1.4]) for (const z of [-d / 2 - 0.7, d / 2 + TERRACE_DEPTH + 0.8]) {
+      for (const x of [p.x - ROOM_W / 2 - 0.5, p.x + ROOM_W / 2 + 0.5]) for (const y of [-0.5, houseHeight(room.level) + 2.65]) for (const z of [-d / 2 - 0.7, d / 2 + TERRACE_DEPTH + 0.8]) {
         const point = new THREE.Vector3(x, y, z); points.push(point); bounds.expandByPoint(point);
       }
     }
@@ -536,6 +568,11 @@ export class SceneManager {
         const worldPerPixel = (this.camera.right - this.camera.left) / (this.container.clientWidth * this.camera.zoom);
         if (image) view.badge.scale.set(targetWidth * worldPerPixel, targetWidth * worldPerPixel * image.height / image.width, 1);
       }
+      if (view.clean) {
+        const scale = 1 + Math.sin(this.simulationTime * 2.1 + id) * 0.035;
+        view.clean.scale.set(4.35 * scale, 0.9 * scale, 1);
+        view.clean.position.y = 0.10 + Math.sin(this.simulationTime * 1.5 + id) * 0.055;
+      }
       const newestBubble = [...view.actors.values()].filter((a) => a.bubble).sort((a, b) => b.bubbleAt - a.bubbleAt)[0];
       for (const [tid, actor] of view.actors) {
         const tenant = this.state!.tenants[tid]; if (!tenant) continue;
@@ -551,14 +588,15 @@ export class SceneManager {
           else actor.stillTime += dt;
           if (actor.stillTime > 2.5) this.report("blocked", tid, actor);
         } else actor.stillTime = 0;
-        const climbing = (p.y > 0.02 && p.y < LOFT_Y - 0.02) || !!actor.path[0]?.stair;
+        const nearestStory = Math.round(p.y / STORY_HEIGHT) * STORY_HEIGHT;
+        const climbing = Math.abs(p.y - nearestStory) > 0.02 || !!actor.path[0]?.stair;
         if (!actor.path.length && actor.goal && running && behavior.phase === "walking") this.report("arrived", tid, actor);
         if (behavior.phase === "active" && !actor.path.length) {
           actor.loopTime += dt;
           if (["briskWalk", "inspectLoft"].includes(behavior.activity) && actor.loopTime > 5.5) {
             actor.loopTime = 0; actor.loopIndex++;
             const up = behavior.activity === "inspectLoft";
-            const goal = view.nav.safePoint({ x: actor.loopIndex % 2 ? -1.25 : 1.3, y: up ? LOFT_Y : 0, z: up ? loftFront(room.level) - 0.55 : roomDepth(room.level) / 2 + 0.7 });
+            const goal = view.nav.safePoint({ x: actor.loopIndex % 2 ? -1.25 : 1.3, y: up ? (houseStoryCount(room.level) - 1) * STORY_HEIGHT : 0, z: up ? loftFront(room.level) - 0.55 : roomDepth(room.level) / 2 + 0.7 });
             const path = goal && view.nav.findPath(p, goal);
             if (path) { actor.goal = goal; actor.path = path; this.route(view, actor); }
           }

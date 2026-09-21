@@ -19,22 +19,22 @@ export function Sheet({
   footer?: ReactNode;
 }) {
   return (
-    <div className="pointer-events-none fixed inset-0 z-30 flex items-end justify-center md:items-stretch md:justify-end">
+    <div className="popup-layer pointer-events-none fixed inset-0 z-30 flex items-end justify-center md:items-end md:justify-start">
       <div
         className="pointer-events-auto absolute inset-0 bg-black/45 backdrop-blur-[2px] md:pointer-events-none md:bg-black/10 md:backdrop-blur-none"
         onClick={onClose}
       />
       <div
         className={cn(
-          "anim-sheet glass pointer-events-auto relative flex w-full max-w-[560px] flex-col rounded-t-[26px] md:my-3 md:mr-3 md:max-h-[calc(100%-1.5rem)] md:w-[400px] md:rounded-[26px]",
-          "max-h-[78vh]",
+          "popup-menu anim-sheet glass pointer-events-auto relative flex w-full max-w-[590px] flex-col rounded-t-[26px] md:mb-4 md:ml-[92px] md:max-h-[calc(100%-7rem)] md:w-[440px] md:rounded-[22px]",
+          "max-h-[82vh]",
         )}
       >
         <div className="flex items-start gap-3 border-b border-white/10 px-4 pt-4 pb-3">
           <div className="grid h-11 w-11 shrink-0 place-items-center rounded-2xl bg-white/10 text-2xl">{icon}</div>
           <div className="min-w-0 flex-1">
-            <h2 className="font-cute truncate text-lg leading-tight font-bold text-white">{title}</h2>
-            {subtitle && <p className="truncate text-xs text-white/55">{subtitle}</p>}
+            <h2 className="font-cute truncate text-xl leading-tight font-bold text-white">{title}</h2>
+            {subtitle && <p className="truncate text-[13px] text-white/60">{subtitle}</p>}
           </div>
           <button
             onClick={onClose}

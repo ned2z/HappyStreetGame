@@ -2,11 +2,12 @@ import { useCallback, useEffect, useMemo, useReducer, useRef, useState } from "r
 import { SceneManager, type PickTarget, type SceneOptions } from "./three/scene";
 import { clearSave, initialState, loadState, reducer, saveState, type Action, type FullState } from "./game/store";
 import { dailyUpkeep, evaluate, roomCapacity, type Evaluation } from "./game/engine";
-import { BottomDock, Toasts, TopBar, type SheetKind } from "./components/Hud";
+import { BottomDock, BuildRail, Toasts, TopBar, type SheetKind } from "./components/Hud";
 import { ApplicantSheet, ExpandSheet, ItemSheet, RoomSheet, ShopSheet, TenantSheet } from "./components/Sheets";
 import { Intro } from "./components/Intro";
 import { SceneTools } from "./components/SceneTools";
 import { ACTIVITY_INFO } from "./game/activities";
+import { houseStoryCount } from "./game/layout";
 import { ThoughtBoard } from "./components/ThoughtBoard";
 import { OutdoorSheet } from "./components/OutdoorSheet";
 
@@ -74,6 +75,9 @@ export default function App() {
         dispatch({ type: "selectRoom", id: (t.district ?? 0) * 3 });
         setOutdoorSlot(t.slot ?? null);
         setSheet("outdoor");
+        break;
+      case "clean":
+        dispatch({ type: "cleanRoom", roomId: t.roomId });
         break;
     }
   }, [dispatch]);
@@ -163,6 +167,7 @@ export default function App() {
       <TopBar state={state} dispatch={dispatch} net={net} onHelp={() => setHelp(true)} />
       <Toasts state={state} dispatch={dispatch} />
       <BottomDock state={state} dispatch={dispatch} evals={evals} roomRents={roomRents} net={net} openSheet={openSheet} sheet={sheet} />
+      {!state.intro && !help && <BuildRail state={state} sheet={sheet} openSheet={openSheet} />}
       {!state.intro && !help && <ThoughtBoard state={state} dispatch={dispatch} covered={sheet !== null} onInspect={(roomId) => { dispatch({ type: "selectRoom", id: roomId }); setSheet("tenant"); }} />}
       {!state.intro && !help && <SceneTools options={sceneOptions} onChange={setSceneOptions} onZoom={(amount) => sceneRef.current?.zoom(amount)} onReset={() => sceneRef.current?.resetCamera()} page={page} maxPage={maxPage} onPage={(p) => { setSceneOptions((options) => ({ ...options, scope: "building" })); dispatch({ type: "selectRoom", id: p * 3 }); }} />}
 
@@ -173,7 +178,7 @@ export default function App() {
             {hasVacancy
               ? "เลือกผู้เช่าให้เข้ากับบ้าน / พัฒนาถึง Lv.5 เพื่อรับ 4 คน"
               : selRoom?.unlocked
-                ? `บ้าน ${selRoom.id + 1} / Lv.${selRoom.level} / แตะวงกลมเพื่อวางอุปกรณ์`
+                ? `บ้าน ${selRoom.id + 1} / Lv.${selRoom.level} / ${houseStoryCount(selRoom.level)} ชั้น / แตะวงกลมเพื่อวางอุปกรณ์`
                 : "แตะห้องในตึกเพื่อเลือกห้อง"}
           </div>
         </div>

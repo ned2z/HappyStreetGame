@@ -3,20 +3,26 @@ import type { PlacedItem, Room } from "./engine";
 
 export interface Point3 { x: number; y: number; z: number }
 export interface Bounds3 { min: Point3; max: Point3 }
-export const ROOM_W = 7.4;
-export const LOFT_Y = 2.5;
-export const WALL_HEIGHT = 4.8;
-export const FLOOR_HEIGHT = 5.35;
+export const ROOM_W = 8.6;
+export const STORY_HEIGHT = 2.55;
+/** Backwards-compatible name for the second-floor elevation. */
+export const LOFT_Y = STORY_HEIGHT;
+/** Maximum house height; use houseHeight(level) for an individual model. */
+export const WALL_HEIGHT = STORY_HEIGHT * 4 - 0.2;
+export const FLOOR_HEIGHT = WALL_HEIGHT + 0.55;
 export const ACTOR_RADIUS = 0.25;
 export const TERRACE_DEPTH = 4.15;
-export const HOUSE_PITCH = 9.4;
-export const STAIR_X = 3.04;
+export const HOUSE_PITCH = 10.8;
+export const STAIR_X = 3.62;
 export const STAIR_WIDTH = 0.88;
 export const STAIR_STEPS = 12;
+export const houseStoryCount = (level: number) => [2, 2, 3, 3, 4][Math.max(0, Math.min(4, level - 1))] ?? 2;
+export const houseHeight = (level: number) => houseStoryCount(level) * STORY_HEIGHT - 0.2;
+export const storyElevations = (level: number) => Array.from({ length: houseStoryCount(level) }, (_, i) => i * STORY_HEIGHT);
 export const roomDepth = (level: number) => [6.6, 8.0, 9.4, 11.2, 13.2][level - 1] ?? 6.6;
-export const floorSlotCount = (level: number) => [6, 9, 12, 15, 18][level - 1] ?? 6;
-export const wallSlotCount = (level: number) => [3, 4, 5, 6, 7][level - 1] ?? 3;
-export const loftSlotCount = (level: number) => [3, 5, 6, 6, 9][level - 1] ?? 3;
+export const floorSlotCount = (level: number) => [9, 12, 15, 18, 21][level - 1] ?? 9;
+export const wallSlotCount = (level: number) => [6, 8, 15, 18, 24][level - 1] ?? 6;
+export const loftSlotCount = (level: number) => [6, 9, 15, 18, 27][level - 1] ?? 6;
 export const isLoftSlot = (slot: number) => slot >= 2000 && slot < 3000;
 export const isWallSlot = (slot: number) => slot >= 1000 && slot < 2000;
 export const isFloorSlot = (slot: number) => slot >= 0 && slot < 1000;
@@ -25,45 +31,88 @@ export const slotZone = (slot: number): PlaceType => (["floor", "wall", "loft", 
 export const encodeSlot = (zone: PlaceType, slot: number) => slot + ZONE_OFFSET[zone];
 export function zoneCapacity(level: number, zone: PlaceType) {
   const index = Math.max(0, Math.min(4, level - 1));
-  const capacities: Record<PlaceType, number[]> = { floor: [6, 9, 12, 15, 18], loft: [3, 5, 6, 6, 9], wall: [3, 4, 5, 6, 7], terrace: [2, 3, 4, 5, 6], nook: [2, 2, 2, 4, 4], surface: [3, 3, 4, 4, 5], ceiling: [2, 3, 4, 5, 6] };
+  const capacities: Record<PlaceType, number[]> = { floor: [9, 12, 15, 18, 21], loft: [6, 9, 15, 18, 27], wall: [6, 8, 15, 18, 24], terrace: [2, 3, 4, 5, 6], nook: [2, 2, 3, 4, 5], surface: [4, 6, 9, 11, 15], ceiling: [4, 6, 9, 12, 16] };
   return capacities[zone]?.[index] ?? 0;
 }
 export const loftFront = (level: number) => -roomDepth(level) / 2 + ([2.8, 3.6, 4.6, 5.4, 6.4][level - 1] ?? 2.8);
 export const isMountedSlot = (slot: number) => isWallSlot(slot) || slotZone(slot) === "ceiling";
-export function interactionFloor(slot: number) {
-  return isLoftSlot(slot) || (isWallSlot(slot) && slot < 1003) || (slotZone(slot) === "ceiling" && slot % 1000 < 3) ? LOFT_Y : 0;
+function storyForIndex(level: number, index: number, capacity: number) {
+  const upperStories = Math.max(1, houseStoryCount(level) - 1);
+  return 1 + Math.min(upperStories - 1, Math.floor(index / Math.ceil(capacity / upperStories)));
+}
+function storyForAllIndex(level: number, index: number, capacity: number) {
+  return Math.min(houseStoryCount(level) - 1, Math.floor(index * houseStoryCount(level) / Math.max(1, capacity)));
+}
+export function upperStoryForSlot(level: number, slot: number) {
+  const zone = slotZone(slot), index = slot % 1000;
+  if (zone === "loft") return storyForIndex(level, index, loftSlotCount(level));
+  if (zone === "wall") return storyForAllIndex(level, index, wallSlotCount(level));
+  if (zone === "surface") return storyForAllIndex(level, index, zoneCapacity(level, "surface"));
+  if (zone === "ceiling") return storyForAllIndex(level, index, zoneCapacity(level, "ceiling"));
+  return 0;
+}
+export function slotStory(level: number, zone: PlaceType, index: number) {
+  return upperStoryForSlot(level, encodeSlot(zone, index));
+}
+export function slotStoryLabel(level: number, zone: PlaceType, index: number) {
+  const story = slotStory(level, zone, index);
+  if (zone === "terrace") return "สวนและระเบียง";
+  if (zone === "nook") return "มุมหน้าบ้าน ชั้น 1";
+  return story ? `ชั้น ${story + 1}` : "ชั้น 1";
+}
+export function interactionFloor(slot: number, level = 1) {
+  return upperStoryForSlot(level, slot) * STORY_HEIGHT;
 }
 
 export function floorSlotPos(level: number, i: number) {
-  return { x: [-2.3, -0.5, 1.3][i % 3], y: 0, z: -roomDepth(level) / 2 + 1.05 + Math.floor(i / 3) * 1.85, rot: 0 };
+  const rows = Math.ceil(floorSlotCount(level) / 3), row = Math.floor(i / 3);
+  const z = rows <= 1 ? 0 : -roomDepth(level) / 2 + 1.05 + row * (roomDepth(level) - 2.1) / (rows - 1);
+  return { x: [-2.8, -0.65, 1.5][i % 3], y: 0, z, rot: 0 };
 }
 export function loftSlotPos(level: number, i: number) {
-  return { x: [-2.3, -0.5, 1.3][i % 3], y: LOFT_Y, z: -roomDepth(level) / 2 + 1.05 + Math.floor(i / 3) * 1.7, rot: 0 };
+  const story = storyForIndex(level, i, loftSlotCount(level));
+  const perStory = Math.ceil(loftSlotCount(level) / Math.max(1, houseStoryCount(level) - 1));
+  const local = i % perStory;
+  const rows = Math.ceil(perStory / 3), row = Math.floor(local / 3);
+  const available = Math.max(0, loftFront(level) + roomDepth(level) / 2 - 2.1);
+  const z = rows <= 1 ? -roomDepth(level) / 2 + 1.05 : -roomDepth(level) / 2 + 1.05 + row * available / (rows - 1);
+  return { x: [-2.8, -0.65, 1.5][local % 3], y: story * STORY_HEIGHT, z, rot: 0 };
 }
 export function wallSlotPos(level: number, i: number) {
-  if (i < 3) return { x: [-2.3, -0.5, 1.3][i], y: LOFT_Y + 1.12, z: -roomDepth(level) / 2 + 0.22, rot: 0 };
-  return { x: -ROOM_W / 2 + 0.22, y: 1.35, z: -roomDepth(level) / 2 + 3.25 + (i - 3) * 1.6, rot: Math.PI / 2 };
+  const story = storyForAllIndex(level, i, wallSlotCount(level));
+  const local = i % 3;
+  return { x: [-2.75, -0.75, 1.25][local % 3], y: story * STORY_HEIGHT + 1.15, z: -roomDepth(level) / 2 + 0.22, rot: 0 };
 }
 export function slotPosition(room: Room, slot: number) {
   const zone = slotZone(slot), i = slot % 1000, d = roomDepth(room.level);
   if (zone === "loft") return loftSlotPos(room.level, i);
   if (zone === "wall") return wallSlotPos(room.level, i);
-  if (zone === "terrace") return { x: [-2.3, 1.3, -0.5, 2.95, -2.3, 2.3][i], y: 0, z: d / 2 + (i < 4 ? 1.65 : 0.55), rot: 0 };
-  if (zone === "nook") return { x: [-2.65, 2.45, -1.55, 1.45][i], y: 0, z: d / 2 - 0.85, rot: 0 };
-  if (zone === "surface") return i < 3 ? { x: [-2.3, -0.5, 1.3][i], y: 1.6, z: -d / 2 + 0.34, rot: 0 } : { x: -3.15, y: 1.55, z: d / 2 - 2.6 + (i - 3) * 1.5, rot: 0 };
-  if (zone === "ceiling") return { x: [-2.3, -0.5, 1.3][i % 3], y: WALL_HEIGHT - 0.40, z: i < 3 ? -d / 2 + 1.15 : loftFront(room.level) + 1.1, rot: 0 };
+  if (zone === "terrace") return { x: [-2.75, 1.25, -0.75, 3.45, -2.75, 2.75][i], y: 0, z: d / 2 + (i < 4 ? 1.65 : 0.55), rot: 0 };
+  if (zone === "nook") return { x: [-3.2, 2.9, -1.7, 1.65][i], y: 0, z: d / 2 - 0.85, rot: 0 };
+  if (zone === "surface") {
+    const story = storyForAllIndex(room.level, i, zoneCapacity(room.level, "surface"));
+    return { x: [-2.75, -0.75, 1.25][i % 3], y: story * STORY_HEIGHT + 1.55, z: -d / 2 + 0.34, rot: 0 };
+  }
+  if (zone === "ceiling") {
+    const story = storyForAllIndex(room.level, i, zoneCapacity(room.level, "ceiling"));
+    return { x: [-2.75, -0.75, 1.25][i % 3], y: (story + 1) * STORY_HEIGHT - 0.42, z: -d / 2 + 1.2, rot: 0 };
+  }
   return floorSlotPos(room.level, i);
 }
 export function roomPosition(room: Room) {
   return { x: ((room.id % 3) - 1) * HOUSE_PITCH, y: 0, z: 0 };
 }
 export function stairs(room: Room) {
+  return stairFlights(room)[0];
+}
+export function stairFlights(room: Room) {
   const front = loftFront(room.level);
-  return {
-    bottom: { x: STAIR_X, y: 0, z: front + 2.6 },
-    top: { x: STAIR_X, y: LOFT_Y, z: front - 0.4 },
-    bounds: { min: { x: STAIR_X - 0.5, y: 0, z: front - 0.1 }, max: { x: STAIR_X + 0.5, y: LOFT_Y, z: front + 2.25 } },
-  };
+  return Array.from({ length: houseStoryCount(room.level) - 1 }, (_, flight) => ({
+    index: flight,
+    bottom: { x: STAIR_X, y: flight * STORY_HEIGHT, z: front + 2.6 },
+    top: { x: STAIR_X, y: (flight + 1) * STORY_HEIGHT, z: front - 0.4 },
+    bounds: { min: { x: STAIR_X - 0.5, y: flight * STORY_HEIGHT, z: front - 0.1 }, max: { x: STAIR_X + 0.5, y: (flight + 1) * STORY_HEIGHT, z: front + 2.25 } },
+  }));
 }
 
 const FOOTPRINTS: Record<string, [number, number, number]> = {
@@ -110,10 +159,10 @@ export function pointInBounds(p: Point3, box: Bounds3, radius = 0) {
 export function terraceFixtures(room: Room): Bounds3[] {
   const z = roomDepth(room.level) / 2;
   const fixtures = [
-    { min: { x: -3.22, y: 0, z: z + 3.00 }, max: { x: -1.65, y: 1, z: z + 3.60 } },
-    { min: { x: 2.65, y: 0, z: z + 3.01 }, max: { x: 3.24, y: 1.3, z: z + 3.63 } },
+    { min: { x: -3.64, y: 0, z: z + 3.00 }, max: { x: -2.06, y: 1, z: z + 3.60 } },
+    { min: { x: 3.14, y: 0, z: z + 3.01 }, max: { x: 3.75, y: 1.3, z: z + 3.63 } },
   ];
-  if (room.level >= 2) for (const sign of [-1, 1]) fixtures.push({ min: { x: sign * 3.53 - 0.06, y: 0, z: z + 3.76 }, max: { x: sign * 3.53 + 0.06, y: 2.3, z: z + 3.88 } });
+  if (room.level >= 2) for (const sign of [-1, 1]) fixtures.push({ min: { x: sign * (ROOM_W / 2 - 0.18) - 0.06, y: 0, z: z + 3.76 }, max: { x: sign * (ROOM_W / 2 - 0.18) + 0.06, y: 2.3, z: z + 3.88 } });
   if (room.level === 5) for (const sign of [-1, 1]) fixtures.push({ min: { x: sign * 3.25 - 0.22, y: 0, z: z + 2.38 }, max: { x: sign * 3.25 + 0.22, y: 0.4, z: z + 2.82 } });
   return fixtures;
 }
@@ -133,8 +182,7 @@ export function placementError(room: Room | undefined, defId: string, grade: num
     const d = roomDepth(room.level);
     const end = zone === "loft" ? loftFront(room.level) - 0.22 : zone === "terrace" ? d / 2 + TERRACE_DEPTH - 0.2 : zone === "nook" ? d / 2 - 0.28 : d / 2 - 0.6;
     if (bounds.min.x < -ROOM_W / 2 + 0.2 || bounds.max.x > ROOM_W / 2 - 0.2 || bounds.min.z < -d / 2 + 0.2 || bounds.max.z > end) return "พื้นที่ไม่พอสำหรับเฟอร์นิเจอร์ชิ้นนี้";
-    const stairBox = stairs(room).bounds;
-    if (bounds.max.x > stairBox.min.x - 0.15 && bounds.max.z > stairBox.min.z - 0.35 && bounds.min.z < stairBox.max.z + 0.3) return "ต้องเว้นพื้นที่บันไดและทางเดิน";
+    if (stairFlights(room).some((stair) => intersects(bounds, stair.bounds, 0.15))) return "ต้องเว้นพื้นที่บันไดและทางเดิน";
     if (actors.some((p) => p.y < bounds.max.y + 0.1 && p.y + 1.15 > bounds.min.y && pointInBounds(p, bounds, ACTOR_RADIUS))) return "มีผู้เช่าอยู่ในพื้นที่นี้ รอให้เดินพ้นก่อนติดตั้ง";
     if (zone === "terrace" && terraceFixtures(room).some((fixed) => intersects(bounds, fixed))) return "ทับพื้นที่ม้านั่งหรือสวนเดิม กรุณาเลือกช่องอื่น";
   }

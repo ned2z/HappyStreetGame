@@ -97,7 +97,7 @@ export function zoneTraitScores(room: Room): { down: Partial<Record<TraitId, num
     const def = FURNITURE_MAP[it.defId];
     if (!def) continue;
     const mult = def.grades[it.grade].mult;
-    const target = interactionFloor(it.slot) === LOFT_Y ? up : down;
+    const target = interactionFloor(it.slot, room.level) >= LOFT_Y ? up : down;
     for (const [t, v] of Object.entries(def.traits)) add(target, t as TraitId, (v as number) * mult);
   }
   return { down, up };

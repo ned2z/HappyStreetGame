@@ -1,5 +1,5 @@
 import { ACTIVITY_INFO, ALL_ACTIVITY_IDS, NEW_ACTIVITY_IDS } from "./activities";
-import { LOFT_Y, encodeSlot, placementError, roomDepth, stairs, type Point3 } from "./layout";
+import { STORY_HEIGHT, encodeSlot, houseHeight, houseStoryCount, loftFront, placementError, roomDepth, slotPosition, slotStory, stairFlights, stairs, zoneCapacity, type Point3 } from "./layout";
 import { RoomNavigation, type Waypoint } from "./navigation";
 import { initialState, migrate, reducer, type FullState } from "./store";
 import { createBehavior, makeTenant } from "./tenants";
@@ -10,7 +10,7 @@ import { houseLevel, roomCapacity, visibleHouseIds } from "./houseLevels";
 import { equipmentEffects, roomSystems } from "./equipment";
 import { evaluate } from "./engine";
 import { buildProp } from "../three/props";
-import { Box3, Vector3 } from "three";
+import { Box3, Mesh, Vector3 } from "three";
 import { advancePath, TENANTS_COLLIDE } from "./movement";
 import { OUTDOOR_CATALOG, OUTDOOR_MAP, commonBenefits, commonPlotPosition, outdoorPrice, totalCommonsUpkeep } from "./commons";
 import { NEW_RESIDENTS, SPECIAL_RESIDENTS, PROFILE_MAP } from "./residentProfiles";
@@ -18,6 +18,7 @@ import { isSpecial } from "./tenants";
 import { buildOutdoor } from "../three/commonsModels";
 import { createSpecialAura, animateSpecialAura } from "../three/aura";
 import { roomTraitScores } from "./engine";
+import { roomShell } from "../three/world";
 
 export interface CheckResult { name: string; ok: boolean; detail: string }
 function assert(value: unknown, message: string): asserts value { if (!value) throw new Error(message); }
@@ -27,7 +28,7 @@ function checkSweptRoute(nav: RoomNavigation, start: Point3, path: Waypoint[]) {
     if (!point.stair && !previous.stair) assert(nav.segmentClear(previous, point), "เส้นทางตัดผ่านสิ่งกีดขวาง");
     if (Math.abs(point.y - previous.y) > 0.02) {
       assert(point.stair || previous.stair, "เปลี่ยนชั้นโดยไม่ผ่านบันได");
-      assert(Math.abs(point.y - previous.y) <= LOFT_Y / 12 + 0.05, "ก้าวขึ้นสูงเกินหนึ่งขั้นบันได");
+      assert(Math.abs(point.y - previous.y) <= STORY_HEIGHT / 12 + 0.05, "ก้าวขึ้นสูงเกินหนึ่งขั้นบันได");
     }
     previous = point;
   }
@@ -57,14 +58,74 @@ export function runRegressionChecks(): CheckResult[] {
     const room = { ...fresh().rooms[0], level };
     const nav = new RoomNavigation(room);
     const start = { x: 0, y: 0, z: roomDepth(level) / 2 + 0.65 };
-    const goal = nav.safePoint({ x: -0.9, y: LOFT_Y, z: stairs(room).top.z });
-    assert(goal, "ชั้นสองไม่มีพื้นที่เดินได้");
+    const topFlight = stairFlights(room).at(-1)!;
+    const goal = nav.safePoint({ x: -0.9, y: (houseStoryCount(level) - 1) * STORY_HEIGHT, z: topFlight.top.z });
+    assert(goal, "ชั้นบนสุดไม่มีพื้นที่เดินได้");
     const up = nav.findPath(start, goal);
-    assert(up && up.some((p) => p.stair), "ไม่มีเส้นทางขึ้นบันได");
+    assert(up && up.filter((p) => p.stair).length >= (houseStoryCount(level) - 1) * 12, "เส้นทางไม่ผ่านบันไดครบทุกชั้น");
     checkSweptRoute(nav, start, up);
     const down = nav.findPath(goal, start);
     assert(down && down.some((p) => p.stair), "ไม่มีเส้นทางกลับลงชั้นล่าง");
     checkSweptRoute(nav, goal, down);
+  });
+  test("จำนวนชั้นและความสูงโมเดลตรงตามระดับบ้าน", () => {
+    const expected = [2, 2, 3, 3, 4];
+    for (let level = 1; level <= 5; level++) {
+      assert(houseStoryCount(level) === expected[level - 1], `Lv.${level} จำนวนชั้นผิด`);
+      assert(stairFlights({ ...fresh().rooms[0], level }).length === expected[level - 1] - 1, `Lv.${level} จำนวนบันไดผิด`);
+      if (level > 1) assert(houseHeight(level) >= houseHeight(level - 1), "บ้านระดับสูงเตี้ยลง");
+    }
+    assert(houseHeight(3) > houseHeight(2) && houseHeight(5) > houseHeight(4), "Lv.3 หรือ Lv.5 ไม่สูงขึ้นจริง");
+    const room3 = { ...fresh().rooms[0], level: 3 }, room5 = { ...fresh().rooms[0], level: 5 };
+    const model3 = roomShell(room3).root, model5 = roomShell(room5).root;
+    const size3 = new Box3().setFromObject(model3).getSize(new Vector3()), size5 = new Box3().setFromObject(model5).getSize(new Vector3());
+    assert(size3.y >= houseHeight(3) && size5.y >= houseHeight(5) && size5.y > size3.y, "ความสูงโมเดล 3/4 ชั้นไม่ตรงโครงสร้าง");
+    assert(size3.x >= 8.5 && size5.x >= 8.5, "บ้านยังไม่ใหญ่ขึ้นตามสัดส่วนใหม่");
+  });
+  test("ชั้น 3 และ 4 มีจุดติดตั้งและเส้นทางเข้าถึงจริง", () => {
+    for (const level of [3, 5]) {
+      const room = { ...fresh().rooms[0], level }, nav = new RoomNavigation(room);
+      for (let story = 1; story < houseStoryCount(level); story++) {
+        const slot = Array.from({ length: zoneCapacity(level, "loft") }, (_, index) => index).find((index) => slotStory(level, "loft", index) === story);
+        assert(slot !== undefined, `ไม่มีจุดติดตั้งชั้น ${story + 1}`);
+        const point = slotPosition(room, encodeSlot("loft", slot));
+        const goal = nav.safePoint(point);
+        assert(goal && Math.abs(goal.y - story * STORY_HEIGHT) < 0.05, `จุดติดตั้งชั้น ${story + 1} เข้าไม่ถึง`);
+        const route = nav.findPath({ x: 0, y: 0, z: roomDepth(level) / 2 + 0.65 }, goal);
+        assert(route && route.filter((waypoint) => waypoint.stair).length >= story * 12, `เส้นทางไม่ขึ้นถึงชั้น ${story + 1}`);
+      }
+    }
+  });
+  test("ช่องเปิดบันไดไม่มีพื้นทับ", () => {
+    const room = { ...fresh().rooms[0], level: 5 }, front = loftFront(room.level), stair = stairFlights(room)[0];
+    const nav = new RoomNavigation(room);
+    assert(!nav.isClear({ x: stair.bottom.x, y: STORY_HEIGHT, z: front + 1 }), "พื้นชั้นบนปิดช่องบันได");
+    const shell = roomShell(room).root;
+    const slabs = shell.children.filter((child) => child instanceof Mesh && Math.abs(child.position.y - (STORY_HEIGHT - 0.08)) < 0.2) as Mesh[];
+    assert(slabs.every((mesh) => {
+      const box = new Box3().setFromObject(mesh);
+      return !(box.min.x < stair.bounds.max.x && box.max.x > stair.bounds.min.x && box.min.z < front + 1 && box.max.z > front + 1);
+    }), "โมเดลพื้นทะลุช่องบันได");
+  });
+  test("ชั้น 2-4 ไม่มีรั้วหรือราวบันไดกั้นเส้นทาง", () => {
+    const room = { ...fresh().rooms[0], level: 5 }, shell = roomShell(room).root;
+    const front = loftFront(room.level), stairs = stairFlights(room);
+    let blockingRails = 0;
+    shell.traverse((object) => {
+      if (!(object instanceof Mesh)) return;
+      const bounds = new Box3().setFromObject(object);
+      const thinVertical = bounds.max.y - bounds.min.y > 0.35 && bounds.max.x - bounds.min.x < 0.09 && bounds.max.z - bounds.min.z < 0.09;
+      const atOpenFront = bounds.min.z < front + 0.08 && bounds.max.z > front - 0.08 && bounds.min.y >= STORY_HEIGHT;
+      const alongStairs = stairs.some((flight) => bounds.min.x < flight.bounds.max.x + 0.12 && bounds.max.x > flight.bounds.min.x - 0.12 && bounds.min.z < flight.bounds.max.z && bounds.max.z > flight.bounds.min.z);
+      if (thinVertical && (atOpenFront || alongStairs)) blockingRails++;
+    });
+    assert(blockingRails === 0, "ยังมีซี่รั้วหรือราวบันไดบนชั้น 2-4");
+    const nav = new RoomNavigation(room);
+    for (let story = 1; story < houseStoryCount(room.level); story++) {
+      const top = stairFlights(room)[story - 1].top;
+      const next = story < stairFlights(room).length ? stairFlights(room)[story].bottom : nav.safePoint({ x: 0, y: story * STORY_HEIGHT, z: front - 0.5 });
+      assert(next && nav.findPath(top, next), `ทางเปิดชั้น ${story + 1} ยังเดินต่อไม่ได้`);
+    }
   });
   test("เดินออกนอกห้องและกลับผ่านทางเข้า", () => {
     const room = fresh().rooms[0], nav = new RoomNavigation(room), d = roomDepth(room.level);
@@ -249,7 +310,7 @@ export function runRegressionChecks(): CheckResult[] {
     assert(TENANTS_COLLIDE === false, "ยังเปิดการชนระหว่างตัวละคร");
     const room = fresh().rooms[0], nav = new RoomNavigation(room);
     const a = { x: 0, y: 0, z: roomDepth(room.level) / 2 + 0.65 };
-    const b = nav.safePoint({ x: -1.0, y: LOFT_Y, z: stairs(room).top.z });
+    const b = nav.safePoint({ x: -1.0, y: STORY_HEIGHT, z: stairs(room).top.z });
     assert(b, "ไม่มีจุดทดสอบชั้นสอง");
     const startA = { ...a }, startB = { ...b };
     const pathA = nav.findPath(a, b), pathB = nav.findPath(b, a);

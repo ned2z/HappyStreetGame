@@ -26,7 +26,7 @@ import { ACTIVITY_INFO, FLOOR_PREF_INFO, MOOD_INFO, moodOf, isSpecial, type Tena
 import { Bar, Btn, Chip, money, Sheet } from "./ui";
 import { cn } from "../utils/cn";
 import { ALL_ACTIVITY_IDS, EXTRA_ACTIVITIES } from "../game/activities";
-import { encodeSlot, placementError, zoneCapacity, slotZone } from "../game/layout";
+import { encodeSlot, houseStoryCount, placementError, slotStory, slotStoryLabel, zoneCapacity, slotZone } from "../game/layout";
 import { findPlacement } from "../game/placement";
 import { EFFECT_INFO, equipmentEffects, type EffectKey } from "../game/equipment";
 import { HouseLevelTrack, HouseSystems } from "./HouseSystems";
@@ -147,7 +147,7 @@ export function ShopSheet({ state, dispatch, close }: Base) {
       title={`แต่งบ้าน ${roomId + 1} / ${FURNITURE.length} แบบ`}
       subtitle={
         target
-          ? `กำลังวางที่${ZONE_LABEL[target.place]} #${target.slot + 1}`
+          ? `กำลังวาง ${slotStoryLabel(room.level, target.place, target.slot)} / ${ZONE_LABEL[target.place]} #${target.slot + 1}`
           : `บ้าน Lv.${room.level} / พื้นที่ว่าง ${Object.values(free).reduce((sum, n) => sum + n, 0)} ช่อง / 7 โซน`
       }
       icon="🛒"
@@ -172,13 +172,20 @@ export function ShopSheet({ state, dispatch, close }: Base) {
               {Array.from({ length: zoneCapacity(room.level, zone) }, (_, slot) => {
                 const item = room.items.find((i) => i.slot === encodeSlot(zone, slot));
                 return <option key={slot} value={`${zone}:${slot}`} disabled={!!item}>
-                  {ZONE_LABEL[zone]} {slot + 1}{item ? ` / ติดตั้ง ${FURNITURE_MAP[item.defId]?.th ?? "แล้ว"}` : " / ว่าง"}
+                  {slotStoryLabel(room.level, zone, slot)} / จุด {slot + 1}{item ? ` / ${FURNITURE_MAP[item.defId]?.th ?? "ติดตั้งแล้ว"}` : " / ว่าง"}
                 </option>;
               })}
             </optgroup>
           ))}
         </select>
       </label>
+      <div className="floor-install-map" aria-label="จำนวนจุดติดตั้งแยกตามชั้น">
+        {Array.from({ length: houseStoryCount(room.level) }, (_, story) => {
+          const slots = ZONES.reduce((sum, zone) => sum + Array.from({ length: zoneCapacity(room.level, zone) }, (_, slot) => Number(slotStory(room.level, zone, slot) === story)).reduce((a, b) => a + b, 0), 0);
+          const used = room.items.filter((item) => slotStory(room.level, slotZone(item.slot), item.slot % 1000) === story).length;
+          return <span key={story}><strong>ชั้น {story + 1}</strong>{used}/{slots} จุด</span>;
+        })}
+      </div>
       <p className="mb-3 text-[10px] leading-relaxed text-[#b7d2af]">ติดตั้งได้ 7 โซน และย้ายของได้ฟรีในเมนูอุปกรณ์ ระบบยังป้องกันวางทับของและปิดทางเดิน</p>
       {!target && (
         <label className="mb-3 block text-[10px] text-white/50">โซนที่ต้องการ
@@ -652,7 +659,7 @@ export function RoomSheet({ state, dispatch, close }: Base) {
   return (
     <Sheet
       title={`บ้าน ${roomId + 1} / ${houseLevel(room.level).name}`}
-      subtitle={`ระดับ ${room.level}/5 / ของ ${room.items.length} ชิ้น / ผู้เช่า ${tenants.length}/${roomCapacity(room)}`}
+      subtitle={`ระดับ ${room.level}/5 / ${houseStoryCount(room.level)} ชั้น / ของ ${room.items.length} ชิ้น / ผู้เช่า ${tenants.length}/${roomCapacity(room)}`}
       icon="🏠"
       onClose={close}
       footer={
@@ -829,7 +836,7 @@ export function ExpandSheet({ state, dispatch, close }: Base) {
               </div>
               <div className="min-w-0 flex-1">
                 <div className="text-xs font-bold text-white">
-                  บ้าน {r.id + 1} <span className="text-white/40">({ts.length}/{roomCapacity(r)})</span>
+                  บ้าน {r.id + 1} <span className="text-white/40">({ts.length}/{roomCapacity(r)} คน / {houseStoryCount(r.level)} ชั้น)</span>
                 </div>
                 <div className="text-[10px] text-amber-200">Lv.{r.level}/5 / {houseLevel(r.level).name}</div>
                 {r.level < 5 && <div className="text-[9px] text-white/45">ขั้นถัดไป {roomCapacity({ level: r.level + 1 })} คน / ค่าดูแลพื้นฐาน {houseLevel(r.level + 1).upkeep}/วัน</div>}
@@ -946,7 +953,7 @@ function ItemLocation({ room, uid, dispatch }: { room: Room; uid: string; dispat
         {Array.from({ length: zoneCapacity(room.level, area) }, (_, index) => {
           const candidate = encodeSlot(area, index);
           const blocked = placementError(room, def.id, item.grade, area, index, uid);
-          return <option key={candidate} value={candidate} disabled={!!blocked}>{ZONE_LABEL[area]} {index + 1}{candidate === item.slot ? " / ตำแหน่งปัจจุบัน" : blocked ? " / ไม่ว่าง" : " / ว่าง"}</option>;
+          return <option key={candidate} value={candidate} disabled={!!blocked}>{slotStoryLabel(room.level, area, index)} / จุด {index + 1}{candidate === item.slot ? " / ตำแหน่งปัจจุบัน" : blocked ? " / ไม่ว่าง" : " / ว่าง"}</option>;
         })}
       </optgroup>)}
     </select>
